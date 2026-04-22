@@ -3,13 +3,30 @@ import { Mic, Play, Pause, Volume2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import WaveformVisualizer from "./WaveformVisualizer";
 
 const API_URL = "https://voicesync-wv9b.onrender.com/convert";
 
+const VOICES = [
+  { value: "alloy", label: "Alloy — Neutral" },
+  { value: "echo", label: "Echo — Warm Male" },
+  { value: "fable", label: "Fable — British" },
+  { value: "onyx", label: "Onyx — Deep Male" },
+  { value: "nova", label: "Nova — Bright Female" },
+  { value: "shimmer", label: "Shimmer — Soft Female" },
+];
+
 const VoiceSync = () => {
   const [text, setText] = useState("");
+  const [voice, setVoice] = useState("alloy");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -31,7 +48,7 @@ const VoiceSync = () => {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, voice }),
       });
 
       if (!res.ok) throw new Error(`Request failed: ${res.status}`);
@@ -58,7 +75,7 @@ const VoiceSync = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [text, rate, audioUrl, toast]);
+  }, [text, voice, rate, audioUrl, toast]);
 
   const togglePlayback = () => {
     const a = audioRef.current;
@@ -103,6 +120,24 @@ const VoiceSync = () => {
           <p className="text-xs text-muted-foreground text-right">
             {text.length} characters
           </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-muted-foreground">
+            Voice
+          </label>
+          <Select value={voice} onValueChange={setVoice}>
+            <SelectTrigger className="bg-muted/50 border-border focus:border-primary text-foreground">
+              <SelectValue placeholder="Select a voice" />
+            </SelectTrigger>
+            <SelectContent>
+              {VOICES.map((v) => (
+                <SelectItem key={v.value} value={v.value}>
+                  {v.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-2">
