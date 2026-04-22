@@ -1,83 +1,82 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Mic, Play, Pause, Volume2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { useToast } from "@/hooks/use-toast";
 import WaveformVisualizer from "./WaveformVisualizer";
+
+const API_URL = "https://voicesync-wv9b.onrender.com/convert";
 
 const VoiceSync = () => {
   const [text, setText] = useState("");
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [hasGenerated, setHasGenerated] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [rate, setRate] = useState(1);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
-    const loadVoices = () => {
-      const available = speechSynthesis.getVoices();
-      if (available.length > 0) {
-        setVoices(available);
-        const english = available.find((v) => v.lang.startsWith("en"));
-        setSelectedVoice((english || available[0]).name);
-      }
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
-    loadVoices();
-    speechSynthesis.onvoiceschanged = loadVoices;
-    return () => { speechSynthesis.onvoiceschanged = null; };
-  }, []);
+  }, [audioUrl]);
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     if (!text.trim()) return;
-    speechSynthesis.cancel();
-
     setIsGenerating(true);
-    setTimeout(() => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      const voice = voices.find((v) => v.name === selectedVoice);
-      if (voice) utterance.voice = voice;
-      utterance.rate = rate;
 
-      utterance.onstart = () => {
-        setIsGenerating(false);
-        setIsPlaying(true);
-        setHasGenerated(true);
-      };
-      utterance.onend = () => setIsPlaying(false);
-      utterance.onerror = () => {
-        setIsGenerating(false);
-        setIsPlaying(false);
-      };
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
 
-      utteranceRef.current = utterance;
-      speechSynthesis.speak(utterance);
-    }, 600);
-  }, [text, selectedVoice, voices, rate]);
+      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+      const blob = await res.blob();
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+
+      // Auto-play once loaded
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.playbackRate = rate;
+          audioRef.current.play().catch(() => {});
+        }
+      }, 50);
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Generation failed",
+        description: err instanceof Error ? err.message : "Could not reach the backend.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [text, rate, audioUrl, toast]);
 
   const togglePlayback = () => {
-    if (isPlaying) {
-      speechSynthesis.pause();
-      setIsPlaying(false);
-    } else if (speechSynthesis.paused) {
-      speechSynthesis.resume();
-      setIsPlaying(true);
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) {
+      a.playbackRate = rate;
+      a.play();
     } else {
-      handleGenerate();
+      a.pause();
     }
   };
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = rate;
+  }, [rate]);
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
-      {/* Header */}
       <div className="text-center mb-10">
         <div className="inline-flex items-center gap-2 mb-4">
           <div className="p-2 rounded-lg bg-primary/10 glow-border">
@@ -90,9 +89,7 @@ const VoiceSync = () => {
         </p>
       </div>
 
-      {/* Main Card */}
       <div className="w-full max-w-2xl glass-card p-6 space-y-6">
-        {/* Text Input */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-muted-foreground">
             Enter your text
@@ -108,42 +105,20 @@ const VoiceSync = () => {
           </p>
         </div>
 
-        {/* Controls Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">
-              Voice
-            </label>
-            <Select value={selectedVoice} onValueChange={setSelectedVoice}>
-              <SelectTrigger className="bg-muted/50 border-border">
-                <SelectValue placeholder="Select a voice" />
-              </SelectTrigger>
-              <SelectContent>
-                {voices.map((voice) => (
-                  <SelectItem key={voice.name} value={voice.name}>
-                    {voice.name} ({voice.lang})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">
-              Speed: {rate.toFixed(1)}x
-            </label>
-            <Slider
-              value={[rate]}
-              onValueChange={([v]) => setRate(v)}
-              min={0.5}
-              max={2}
-              step={0.1}
-              className="mt-3"
-            />
-          </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-muted-foreground">
+            Speed: {rate.toFixed(1)}x
+          </label>
+          <Slider
+            value={[rate]}
+            onValueChange={([v]) => setRate(v)}
+            min={0.5}
+            max={2}
+            step={0.1}
+            className="mt-3"
+          />
         </div>
 
-        {/* Generate Button */}
         <Button
           onClick={handleGenerate}
           disabled={!text.trim() || isGenerating}
@@ -162,15 +137,27 @@ const VoiceSync = () => {
           )}
         </Button>
 
-        {/* Audio Player */}
-        {(hasGenerated || isGenerating) && (
+        {(audioUrl || isGenerating) && (
           <div className="glass-card p-5 space-y-4 border-primary/20">
             <WaveformVisualizer isPlaying={isPlaying} />
+
+            {audioUrl && (
+              <audio
+                ref={audioRef}
+                src={audioUrl}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+                className="w-full"
+                controls
+              />
+            )}
 
             <div className="flex items-center justify-center">
               <button
                 onClick={togglePlayback}
-                className="w-14 h-14 rounded-full flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-all glow-border"
+                disabled={!audioUrl}
+                className="w-14 h-14 rounded-full flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-all glow-border disabled:opacity-40"
               >
                 {isPlaying ? (
                   <Pause className="w-6 h-6" />
@@ -181,14 +168,14 @@ const VoiceSync = () => {
             </div>
 
             <p className="text-center text-sm text-muted-foreground">
-              {isPlaying ? "Playing..." : "Ready to play"}
+              {isGenerating ? "Generating..." : isPlaying ? "Playing..." : "Ready to play"}
             </p>
           </div>
         )}
       </div>
 
       <p className="mt-8 text-sm text-muted-foreground">
-        Powered by Web Speech API
+        Powered by VoiceSync API
       </p>
     </div>
   );
