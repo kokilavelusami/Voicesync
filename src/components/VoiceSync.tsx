@@ -53,6 +53,18 @@ const VoiceSync = () => {
 
       if (!res.ok) throw new Error(`Request failed: ${res.status}`);
 
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("audio")) {
+        // Backend returned JSON (likely an error) instead of audio
+        const errBody = await res.json().catch(() => null);
+        const message =
+          errBody?.detail?.message ||
+          errBody?.detail ||
+          errBody?.error ||
+          "Backend did not return audio.";
+        throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+      }
+
       const blob = await res.blob();
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       const url = URL.createObjectURL(blob);
