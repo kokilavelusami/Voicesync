@@ -20,13 +20,106 @@ const VOICES: Record<string, string> = {
   "pqHfZKP75CvOlQylNhV4": "Bill",
 };
 
+// Map ElevenLabs voice IDs to OpenAI TTS voices for fallback
+const FALLBACK_VOICE_MAP: Record<string, string> = {
+  "9BWtsMINqrJLrRacOk9x": "nova",
+  "EXAVITQu4vr4xnSDxMaL": "shimmer",
+  "FGY2WhTYpPnrIDTdsKH5": "nova",
+  "Xb7hH8MSUJpSbSDYk0k2": "shimmer",
+  "pFZP5JQG7iQjIQuC4Bku": "shimmer",
+  "CwhRBWXzGAHq8TQ4Fs17": "onyx",
+  "JBFqnCBsd6RMkjVDRZzb": "echo",
+  "IKne3meq5aSn9XLyUdCD": "fable",
+  "TX3LPaxmHKxFdv7VOQHJ": "onyx",
+  "pqHfZKP75CvOlQylNhV4": "onyx",
+  "XB0fDUnXU5powFXDhCwa": "nova",
+};
+
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function tryElevenLabs(text: string, voiceId: string): Promise<ArrayBuffer | null> {
+  const apiKey = Deno.env.get("ELEVENLABS_API_KEY");
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_turbo_v2_5",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.3,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+    );
+    if (!res.ok) {
+      console.warn(`ElevenLabs failed (${res.status}), falling back`);
+      return null;
+    }
+    return await res.arrayBuffer();
+  } catch (e) {
+    console.warn("ElevenLabs error, falling back:", e);
+    return null;
+  }
+}
+
+async function tryLovableAI(text: string, voiceId: string): Promise<ArrayBuffer | null> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) return null;
+
+  const voice = FALLBACK_VOICE_MAP[voiceId] ?? "alloy";
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini-tts",
+        input: text,
+        voice,
+        response_format: "mp3",
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`Lovable AI TTS failed (${res.status}):`, errText);
+      return null;
+    }
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("application/json")) {
+      const json = await res.json();
+      if (json.audio) return base64ToArrayBuffer(json.audio);
+      if (json.data?.[0]?.b64_json) return base64ToArrayBuffer(json.data[0].b64_json);
+      console.error("Lovable AI: unexpected JSON shape", json);
+      return null;
+    }
+    return await res.arrayBuffer();
+  } catch (e) {
+    console.error("Lovable AI error:", e);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Auth
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -53,7 +146,6 @@ Deno.serve(async (req) => {
     }
     const userId = userData.user.id;
 
-    // Validate body
     const body = await req.json().catch(() => null);
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     const voiceId = typeof body?.voiceId === "string" ? body.voiceId : "";
@@ -71,51 +163,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    const apiKey = Deno.env.get("ELEVENLABS_API_KEY");
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "TTS service not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Try ElevenLabs first, then fall back to Lovable AI
+    let provider: "elevenlabs" | "lovable_ai" = "elevenlabs";
+    let audioBuffer = await tryElevenLabs(text, voiceId);
+    if (!audioBuffer) {
+      provider = "lovable_ai";
+      audioBuffer = await tryLovableAI(text, voiceId);
     }
 
-    // Call ElevenLabs
-    const elevenRes = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text,
-          model_id: "eleven_turbo_v2_5",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.3,
-            use_speaker_boost: true,
-          },
-        }),
-      },
-    );
-
-    if (!elevenRes.ok) {
-      const errText = await elevenRes.text();
-      console.error("ElevenLabs error:", elevenRes.status, errText);
+    if (!audioBuffer) {
       return new Response(
-        JSON.stringify({ error: `Voice generation failed (${elevenRes.status})` }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
+        JSON.stringify({ error: "All voice providers are unavailable. Please try again later." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const audioBuffer = await elevenRes.arrayBuffer();
-
-    // Upload to storage with service role
     const adminClient = createClient(supabaseUrl, serviceKey);
     const fileName = `${userId}/${crypto.randomUUID()}.mp3`;
 
@@ -131,8 +193,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Insert generation record
-    const { data: genRow, error: insertError } = await adminClient
+    const { data: genRow } = await adminClient
       .from("generations")
       .insert({
         user_id: userId,
@@ -145,11 +206,6 @@ Deno.serve(async (req) => {
       .select()
       .single();
 
-    if (insertError) {
-      console.error("Insert error:", insertError);
-    }
-
-    // Signed URL valid for 24h
     const { data: signed, error: signError } = await adminClient.storage
       .from("voice-audio")
       .createSignedUrl(fileName, 60 * 60 * 24);
@@ -167,6 +223,7 @@ Deno.serve(async (req) => {
         audioPath: fileName,
         generationId: genRow?.id ?? null,
         voiceName: VOICES[voiceId],
+        provider,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
