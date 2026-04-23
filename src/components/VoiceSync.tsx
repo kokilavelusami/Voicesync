@@ -50,7 +50,10 @@ const VoiceSync = () => {
         }
       }, 50);
 
-      toast({ title: "Audio generated", description: `Voice: ${data.voiceName}` });
+      toast({
+        title: "Audio generated",
+        description: `${data.voiceName}${data.provider === "lovable_ai" ? " · backup engine" : ""}`,
+      });
     } catch (err) {
       console.error(err);
       toast({
