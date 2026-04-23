@@ -1,22 +1,31 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Pause, Volume2, Loader2, Download, Save } from "lucide-react";
+import { Play, Pause, Volume2, Loader2, Download, Sparkles, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { VOICES, DEFAULT_VOICE_ID } from "@/lib/voices";
 import { cn } from "@/lib/utils";
+import {
+  speak as browserSpeak,
+  stopSpeaking,
+  isBrowserTTSAvailable,
+} from "@/lib/browserTTS";
 import WaveformVisualizer from "./WaveformVisualizer";
 
 const MAX_CHARS = 5000;
+type Engine = "browser" | "elevenlabs";
 
 const VoiceSync = () => {
   const [text, setText] = useState("");
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
+  const [engine, setEngine] = useState<Engine>("browser");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [activeEngine, setActiveEngine] = useState<Engine | null>(null);
   const [rate, setRate] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
@@ -25,7 +34,42 @@ const VoiceSync = () => {
     if (audioRef.current) audioRef.current.playbackRate = rate;
   }, [rate]);
 
-  const handleGenerate = useCallback(async () => {
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  const playWithBrowser = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (!isBrowserTTSAvailable()) {
+      toast({ title: "Browser voice not supported", variant: "destructive" });
+      return;
+    }
+    setActiveEngine("browser");
+    setAudioUrl(null);
+    audioRef.current?.pause();
+
+    try {
+      await browserSpeak({
+        text: trimmed,
+        voiceId,
+        rate,
+        onStart: () => setIsPlaying(true),
+        onEnd: () => setIsPlaying(false),
+        onError: () => {
+          setIsPlaying(false);
+          toast({ title: "Playback error", variant: "destructive" });
+        },
+      });
+    } catch {
+      setIsPlaying(false);
+    }
+  }, [text, voiceId, rate, toast]);
+
+  const generateWithElevenLabs = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed) return;
     if (trimmed.length > MAX_CHARS) {
@@ -34,14 +78,25 @@ const VoiceSync = () => {
     }
 
     setIsGenerating(true);
+    stopSpeaking();
     try {
       const { data, error } = await supabase.functions.invoke("text-to-speech", {
         body: { text: trimmed, voiceId },
       });
 
       if (error) throw new Error(error.message || "Generation failed");
-      if (!data?.audioUrl) throw new Error("No audio returned");
 
+      if (data?.code === "premium_unavailable" || !data?.audioUrl) {
+        toast({
+          title: "Premium engine offline",
+          description: "Switched to browser voice for this clip.",
+        });
+        setEngine("browser");
+        await playWithBrowser();
+        return;
+      }
+
+      setActiveEngine("elevenlabs");
       setAudioUrl(data.audioUrl);
       setTimeout(() => {
         if (audioRef.current) {
@@ -50,23 +105,38 @@ const VoiceSync = () => {
         }
       }, 50);
 
-      toast({
-        title: "Audio generated",
-        description: `${data.voiceName}${data.provider === "lovable_ai" ? " · backup engine" : ""}`,
-      });
+      toast({ title: "Premium audio ready", description: data.voiceName });
     } catch (err) {
       console.error(err);
       toast({
-        title: "Generation failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
+        title: "Premium engine unavailable",
+        description: "Falling back to browser voice.",
       });
+      setEngine("browser");
+      await playWithBrowser();
     } finally {
       setIsGenerating(false);
     }
-  }, [text, voiceId, rate, toast]);
+  }, [text, voiceId, rate, toast, playWithBrowser]);
+
+  const handleAction = useCallback(() => {
+    if (engine === "elevenlabs") generateWithElevenLabs();
+    else playWithBrowser();
+  }, [engine, generateWithElevenLabs, playWithBrowser]);
 
   const togglePlayback = () => {
+    if (activeEngine === "browser") {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        setIsPlaying(false);
+      } else if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setIsPlaying(true);
+      } else {
+        playWithBrowser();
+      }
+      return;
+    }
     const a = audioRef.current;
     if (!a) return;
     if (a.paused) {
@@ -95,16 +165,43 @@ const VoiceSync = () => {
     }
   };
 
+  const showOutput = isGenerating || isPlaying || audioUrl;
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-10 space-y-8">
       <div className="text-center space-y-3">
         <h1 className="text-4xl md:text-5xl font-bold gradient-text">Transform text into voice</h1>
         <p className="text-muted-foreground text-lg">
-          Studio-quality AI speech synthesis powered by ElevenLabs
+          Instant browser playback, with optional studio-quality AI generation
         </p>
       </div>
 
       <div className="glass-card p-6 space-y-6">
+        <div className="flex items-center justify-between gap-4 p-3 rounded-lg bg-muted/30 border border-border">
+          <div className="flex items-center gap-3 min-w-0">
+            {engine === "elevenlabs" ? (
+              <Sparkles className="w-5 h-5 text-primary flex-shrink-0" />
+            ) : (
+              <Globe className="w-5 h-5 text-primary flex-shrink-0" />
+            )}
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">
+                {engine === "elevenlabs" ? "Premium AI engine" : "Instant browser engine"}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">
+                {engine === "elevenlabs"
+                  ? "ElevenLabs · saved to history"
+                  : "Web Speech API · works offline, no quota"}
+              </div>
+            </div>
+          </div>
+          <Switch
+            checked={engine === "elevenlabs"}
+            onCheckedChange={(v) => setEngine(v ? "elevenlabs" : "browser")}
+            aria-label="Toggle premium engine"
+          />
+        </div>
+
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium text-muted-foreground">Your text</label>
@@ -163,24 +260,24 @@ const VoiceSync = () => {
         </div>
 
         <Button
-          onClick={handleGenerate}
+          onClick={handleAction}
           disabled={!text.trim() || isGenerating}
           className="w-full h-12 text-base font-semibold glow-border"
         >
           {isGenerating ? (
             <>
               <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-              Generating...
+              Generating premium audio...
             </>
           ) : (
             <>
               <Volume2 className="w-5 h-5 mr-2" />
-              Generate Speech
+              {engine === "elevenlabs" ? "Generate Premium Audio" : "Speak Now"}
             </>
           )}
         </Button>
 
-        {(audioUrl || isGenerating) && (
+        {showOutput && (
           <div className="glass-card p-5 space-y-4 border-primary/20">
             <WaveformVisualizer isPlaying={isPlaying} />
 
@@ -198,21 +295,31 @@ const VoiceSync = () => {
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={togglePlayback}
-                disabled={!audioUrl}
-                className="w-14 h-14 rounded-full flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-all glow-border disabled:opacity-40"
+                className="w-14 h-14 rounded-full flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-all glow-border"
                 aria-label={isPlaying ? "Pause" : "Play"}
               >
                 {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
               </button>
-              <Button variant="outline" size="sm" onClick={downloadAudio} disabled={!audioUrl}>
-                <Download className="w-4 h-4 mr-2" />
-                Download MP3
-              </Button>
+              {audioUrl && (
+                <Button variant="outline" size="sm" onClick={downloadAudio}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download MP3
+                </Button>
+              )}
             </div>
 
-            <p className="text-center text-xs text-muted-foreground flex items-center justify-center gap-1">
-              <Save className="w-3 h-3" />
-              Saved to your history automatically
+            <p className="text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
+              {activeEngine === "elevenlabs" ? (
+                <>
+                  <Sparkles className="w-3 h-3" />
+                  Premium clip · saved to your history
+                </>
+              ) : (
+                <>
+                  <Globe className="w-3 h-3" />
+                  Browser playback · enable Premium to save to history
+                </>
+              )}
             </p>
           </div>
         )}

@@ -20,6 +20,7 @@ export type Database = {
           character_count: number
           created_at: string
           duration_seconds: number | null
+          engine: string
           id: string
           text: string
           user_id: string
@@ -31,6 +32,7 @@ export type Database = {
           character_count: number
           created_at?: string
           duration_seconds?: number | null
+          engine?: string
           id?: string
           text: string
           user_id: string
@@ -42,6 +44,7 @@ export type Database = {
           character_count?: number
           created_at?: string
           duration_seconds?: number | null
+          engine?: string
           id?: string
           text?: string
           user_id?: string
