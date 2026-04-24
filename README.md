@@ -47,7 +47,7 @@
 
 ### 1. Clone & install
 ```bash
-git clone https://github.com/YOUR-USERNAME/voicesync.git
+git clone https://github.com/kokilavelusami/voicesync.git
 cd voicesync
 bun install
 ```
@@ -163,6 +163,6 @@ MIT — see [LICENSE](LICENSE)
 
 ## 🙋 Author
 
-Built by **[Kokila Velusamy]** — [LinkedIn](www.linkedin.com/in/kokila-velusamy-b2a167292) · [Portfolio](https://your-site.com)
+Built by **Kokila Velusamy** — [LinkedIn](www.linkedin.com/in/kokila-velusamy-b2a167292) · [Portfolio](https://your-site.com)
 
 > Live demo: [voicesync.lovable.app](https://voicesync.lovable.app)
