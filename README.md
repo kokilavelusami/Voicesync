@@ -163,6 +163,6 @@ MIT — see [LICENSE](LICENSE)
 
 ## 🙋 Author
 
-Built by **[Your Name]** — [LinkedIn](https://linkedin.com/in/your-handle) · [Portfolio](https://your-site.com)
+Built by **[Kokila Velusamy]** — [LinkedIn](www.linkedin.com/in/kokila-velusamy-b2a167292) · [Portfolio](https://your-site.com)
 
 > Live demo: [voicesync.lovable.app](https://voicesync.lovable.app)
