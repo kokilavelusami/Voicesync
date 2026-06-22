@@ -21,6 +21,8 @@ type Engine = "browser" | "elevenlabs";
 
 const VoiceSync = () => {
   const [text, setText] = useState("");
+  const [topic, setTopic] = useState("");
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
   const [engine, setEngine] = useState<Engine>("browser");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -30,6 +32,42 @@ const VoiceSync = () => {
   const [rate, setRate] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
+
+  const generateScript = useCallback(async () => {
+    const t = topic.trim();
+    if (!t) {
+      toast({ title: "Enter a podcast topic first", variant: "destructive" });
+      return;
+    }
+    setIsGeneratingScript(true);
+    try {
+      const res = await fetch("http://localhost:11434/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama3",
+          prompt: `You are a professional podcast scriptwriter. Write a clear, engaging, conversational podcast-style monologue script on the topic: "${t}". Include a brief hook intro, 3-4 main talking points with natural transitions, and a short closing. Keep it under 400 words. Output ONLY the spoken script text — no headings, no stage directions, no markdown.`,
+          stream: false,
+        }),
+      });
+      if (!res.ok) throw new Error(`Ollama responded ${res.status}`);
+      const data = await res.json();
+      const script = (data?.response ?? "").trim();
+      if (!script) throw new Error("Empty response from Ollama");
+      setText(script);
+      toast({ title: "Script generated", description: "You can edit it before generating audio." });
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Couldn't reach Ollama",
+        description: "Make sure Ollama is running locally (ollama serve) with the llama3 model pulled.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  }, [topic, toast]);
+
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = rate;
