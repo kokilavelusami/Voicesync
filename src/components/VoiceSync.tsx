@@ -39,31 +39,93 @@ const VoiceSync = () => {
       toast({ title: "Enter a podcast topic first", variant: "destructive" });
       return;
     }
+
+    // Mixed-content guard: browsers block http://localhost requests from an https page.
+    if (typeof window !== "undefined" && window.location.protocol === "https:") {
+      console.error(
+        "[Ollama] Page is HTTPS but Ollama runs on http://localhost:11434. " +
+        "Browsers block this as mixed content. Run the app locally (npm run dev) to use Generate Script.",
+      );
+      toast({
+        title: "Can't reach Ollama from the hosted preview",
+        description:
+          "Ollama is http://localhost only; browsers block it from https pages. Run the app locally (npm run dev) and open http://localhost:8080.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGeneratingScript(true);
+    const prompt = `Create a professional podcast script about ${t}. Include an engaging introduction, explanation of key concepts, practical examples, and a conclusion. Output ONLY the spoken script text — no headings, no stage directions, no markdown.`;
+    console.log("[Ollama] POST http://localhost:11434/api/generate", { model: "llama3", topic: t });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
     try {
       const res = await fetch("http://localhost:11434/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "llama3",
-          prompt: `You are a professional podcast scriptwriter. Write a clear, engaging, conversational podcast-style monologue script on the topic: "${t}". Include a brief hook intro, 3-4 main talking points with natural transitions, and a short closing. Keep it under 400 words. Output ONLY the spoken script text — no headings, no stage directions, no markdown.`,
-          stream: false,
-        }),
+        body: JSON.stringify({ model: "llama3", prompt, stream: false }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`Ollama responded ${res.status}`);
+
+      console.log("[Ollama] status", res.status);
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error("[Ollama] error body:", errText);
+        if (res.status === 404 || /model.*not found/i.test(errText)) {
+          toast({
+            title: "Model 'llama3' not installed",
+            description: "Run: ollama pull llama3",
+            variant: "destructive",
+          });
+        } else if (res.status === 403) {
+          toast({
+            title: "Ollama blocked the request (CORS)",
+            description: "Restart Ollama with: OLLAMA_ORIGINS='*' ollama serve",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Unable to generate script",
+            description: `Ollama responded ${res.status}. ${errText.slice(0, 120)}`,
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
       const data = await res.json();
+      console.log("[Ollama] response", data);
       const script = (data?.response ?? "").trim();
-      if (!script) throw new Error("Empty response from Ollama");
+      if (!script) {
+        toast({ title: "Empty response from Ollama", variant: "destructive" });
+        return;
+      }
       setText(script);
       toast({ title: "Script generated", description: "You can edit it before generating audio." });
-    } catch (err) {
-      console.error(err);
-      toast({
-        title: "Couldn't reach Ollama",
-        description: "Make sure Ollama is running locally (ollama serve) with the llama3 model pulled.",
-        variant: "destructive",
-      });
+    } catch (err: unknown) {
+      console.error("[Ollama] fetch failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes("abort")) {
+        toast({
+          title: "Ollama timed out",
+          description: "The model took too long. Try a shorter topic or a smaller model.",
+          variant: "destructive",
+        });
+      } else if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        toast({
+          title: "Ollama server is not running",
+          description: "Start it with: OLLAMA_ORIGINS='*' ollama serve  (and: ollama pull llama3)",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Unable to generate script", description: msg, variant: "destructive" });
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsGeneratingScript(false);
     }
   }, [topic, toast]);
