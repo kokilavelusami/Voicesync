@@ -241,6 +241,43 @@ const VoiceSync = () => {
           />
         </div>
 
+        <div className="space-y-2 p-4 rounded-lg bg-muted/20 border border-border">
+          <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <Wand2 className="w-4 h-4 text-primary" />
+            Podcast Topic
+          </label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. The future of AI in everyday life"
+              className="bg-muted/40 border-border focus:border-primary"
+              disabled={isGeneratingScript}
+            />
+            <Button
+              onClick={generateScript}
+              disabled={!topic.trim() || isGeneratingScript}
+              variant="outline"
+              className="sm:w-auto"
+            >
+              {isGeneratingScript ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  Generate Script
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Uses your local Ollama (llama3). Run <code className="px-1 rounded bg-muted">ollama serve</code> and edit the script below before generating audio.
+          </p>
+        </div>
+
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium text-muted-foreground">Your text</label>
@@ -251,7 +288,7 @@ const VoiceSync = () => {
           <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Type or paste your text here..."
+            placeholder="Type or paste your text here, or generate a script from a topic above..."
             className="min-h-[140px] bg-muted/40 border-border focus:border-primary resize-none"
           />
         </div>
