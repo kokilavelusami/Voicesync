@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Pause, Volume2, Loader2, Download, Sparkles, Globe } from "lucide-react";
+import { Play, Pause, Volume2, Loader2, Download, Sparkles, Globe, Wand2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
@@ -20,6 +21,8 @@ type Engine = "browser" | "elevenlabs";
 
 const VoiceSync = () => {
   const [text, setText] = useState("");
+  const [topic, setTopic] = useState("");
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
   const [engine, setEngine] = useState<Engine>("browser");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -29,6 +32,42 @@ const VoiceSync = () => {
   const [rate, setRate] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
+
+  const generateScript = useCallback(async () => {
+    const t = topic.trim();
+    if (!t) {
+      toast({ title: "Enter a podcast topic first", variant: "destructive" });
+      return;
+    }
+    setIsGeneratingScript(true);
+    try {
+      const res = await fetch("http://localhost:11434/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama3",
+          prompt: `You are a professional podcast scriptwriter. Write a clear, engaging, conversational podcast-style monologue script on the topic: "${t}". Include a brief hook intro, 3-4 main talking points with natural transitions, and a short closing. Keep it under 400 words. Output ONLY the spoken script text — no headings, no stage directions, no markdown.`,
+          stream: false,
+        }),
+      });
+      if (!res.ok) throw new Error(`Ollama responded ${res.status}`);
+      const data = await res.json();
+      const script = (data?.response ?? "").trim();
+      if (!script) throw new Error("Empty response from Ollama");
+      setText(script);
+      toast({ title: "Script generated", description: "You can edit it before generating audio." });
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Couldn't reach Ollama",
+        description: "Make sure Ollama is running locally (ollama serve) with the llama3 model pulled.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  }, [topic, toast]);
+
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = rate;
@@ -202,6 +241,43 @@ const VoiceSync = () => {
           />
         </div>
 
+        <div className="space-y-2 p-4 rounded-lg bg-muted/20 border border-border">
+          <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <Wand2 className="w-4 h-4 text-primary" />
+            Podcast Topic
+          </label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. The future of AI in everyday life"
+              className="bg-muted/40 border-border focus:border-primary"
+              disabled={isGeneratingScript}
+            />
+            <Button
+              onClick={generateScript}
+              disabled={!topic.trim() || isGeneratingScript}
+              variant="outline"
+              className="sm:w-auto"
+            >
+              {isGeneratingScript ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  Generate Script
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Uses your local Ollama (llama3). Run <code className="px-1 rounded bg-muted">ollama serve</code> and edit the script below before generating audio.
+          </p>
+        </div>
+
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium text-muted-foreground">Your text</label>
@@ -212,7 +288,7 @@ const VoiceSync = () => {
           <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Type or paste your text here..."
+            placeholder="Type or paste your text here, or generate a script from a topic above..."
             className="min-h-[140px] bg-muted/40 border-border focus:border-primary resize-none"
           />
         </div>
