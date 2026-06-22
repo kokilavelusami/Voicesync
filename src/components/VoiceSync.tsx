@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Pause, Volume2, Loader2, Download, Sparkles, Globe } from "lucide-react";
+import { Play, Pause, Volume2, Loader2, Download, Sparkles, Globe, Wand2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
